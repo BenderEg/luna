@@ -31,7 +31,7 @@
         "webhook_url": "http://backend:8000/api/v1/notifications"
     }
 
-Для проверки в логах должна появится запись: "Notification received: ... "
+Для проверки в логах (docker logs luna_api) должна появится запись: "Notification received: ... "
 
 Графический интерфейс RabbitMQ доступен по ссылке: http://127.0.0.1:15672
 
