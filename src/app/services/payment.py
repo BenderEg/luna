@@ -1,60 +1,39 @@
 from uuid import UUID
 
-from sqlalchemy import select
-
-from src.app.services.base import BaseService
-from src.app.exceptions.http_exceptions import (
-    NotFoundError,
-)
-from src.app.models.outbox import EventType, Outbox
+from src.app.exceptions.http_exceptions import NotFoundError
+from src.app.models.outbox import EventType
 from src.app.models.payment import Payment, PaymentStatus
-from src.app.schemas.payment import (
-    PaymentCreate,
-    PaymentDetail,
-)
+from src.app.repositories.unit_of_work import UnitOfWork
+from src.app.schemas.payment import PaymentCreate, PaymentDetail
 
 
-class PaymentService(BaseService):
+class PaymentService:
 
-    MODEL = Payment
-    SCHEMA = PaymentDetail
+    def __init__(self, uow: UnitOfWork) -> None:
+        self.uow = uow
 
-    async def create(
-        self,
-        dto: PaymentCreate,
-        idempotency_key: str,
-    ) -> PaymentDetail:
-        await self._check_not_exist(self.MODEL, "idempotency_key", idempotency_key)
-        new_obj: Payment = await self.add(dto, extras = {"idempotency_key": idempotency_key}, do_commit=False)
-        await self.session.flush()
-        self.session.add(
-            Outbox(
-                event_type=EventType.PAYMENT_NEW,
-                payload={
-                    "payment_id": str(new_obj.id),
-                    "webhook_url": new_obj.webhook_url,
-                }
-            )
+    async def create(self, dto: PaymentCreate, idempotency_key: str) -> PaymentDetail:
+        await self.uow.payments.check_idempotency_key_free(idempotency_key)
+        new_payment = await self.uow.payments.create(dto, idempotency_key)
+        await self.uow.flush()
+        await self.uow.outbox.add_event(
+            event_type=EventType.PAYMENT_NEW,
+            payload={
+                "payment_id": str(new_payment.id),
+                "webhook_url": new_payment.webhook_url,
+            },
         )
-        await self.session.commit()
-        return self.SCHEMA.model_validate(new_obj)
-    
-    def is_payment_active(self, obj: Payment) -> bool:
-        if obj.status == PaymentStatus.PENDING:
-            return True
-        return False
+        return PaymentDetail.model_validate(new_payment)
 
     async def get_by_id(self, payment_id: UUID) -> PaymentDetail:
-        records = await self.session.execute(
-            select(self.MODEL)
-            .filter(self.MODEL.id == payment_id),
-        )
-        build_result = await self._build_result(records)
-        if not build_result:
+        payment = await self.uow.payments.get_by_id(payment_id)
+        if not payment:
             raise NotFoundError(f"Оплата с {payment_id=} отсутствует в БД")
-        return build_result[0]
+        return PaymentDetail.model_validate(payment)
 
     async def set_is_paid(self, payment_id: UUID) -> None:
-        obj = await self.session.get_one(self.MODEL, payment_id)
-        obj.status = PaymentStatus.SUCCEEDED
-        await self.session.commit()
+        payment = await self.uow.payments.get_one_by_id_or_raise(payment_id)
+        payment.status = PaymentStatus.SUCCEEDED
+
+    def is_payment_active(self, obj: Payment) -> bool:
+        return obj.status == PaymentStatus.PENDING

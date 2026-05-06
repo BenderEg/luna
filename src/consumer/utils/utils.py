@@ -24,12 +24,13 @@ async def mock_make_payment(data: dict, payment_serice: PaymentService) -> None:
     payment_id = UUID(data.get("payment_id"))
     payment = await payment_serice.get_by_id(payment_id)
     if payment_serice.is_payment_active(payment):
-        await payment_serice.session.commit() # to avoid holding transaction
+        await payment_serice.uow.commit()  # release transaction before sleep
         await asyncio.sleep(random.randint(2, 5))
         if random.random() >= 0.9:
             raise PaymentFailure(f"Failed to make payment for payload: {data}")
         else:
             await payment_serice.set_is_paid(payment_id)
+            await payment_serice.uow.commit()
 
 
 @backoff.on_exception(

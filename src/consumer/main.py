@@ -6,6 +6,7 @@ from faststream.rabbit import RabbitBroker, RabbitMessage, RabbitQueue
 
 from src.app.configs.settings import settings
 from src.app.configs.database import async_session
+from src.app.repositories.unit_of_work import UnitOfWork
 from src.app.services.payment import PaymentService
 from src.app.utils.logger import get_logger, setup_logging
 from src.consumer.utils.aiohttp_session import (
@@ -76,7 +77,7 @@ async def handle_payment(msg: RabbitMessage):
     headers = msg.headers or {}
     retry_count = headers.get("x-retry-count", 0)
     async with async_session() as session:
-        payment_service = PaymentService(session=session)
+        payment_service = PaymentService(uow=UnitOfWork(session=session))
         try:
             await mock_make_payment(data, payment_service)
             logger.info(f"Succesfuly process payment msg from {settings.PAYMENTS_QUEUE} queue: {data}")

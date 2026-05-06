@@ -40,3 +40,4 @@ env/
 
 # application
 credentials.yaml
+CLAUDE*
